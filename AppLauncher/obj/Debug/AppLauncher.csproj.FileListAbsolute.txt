@@ -1,0 +1,21 @@
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\bin\Debug\AppLauncher.exe.config
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\bin\Debug\AppLauncher.exe
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\bin\Debug\AppLauncher.pdb
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\obj\Debug\AppLauncher.csprojResolveAssemblyReference.cache
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\obj\Debug\AppLauncher.Properties.Resources.resources
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\obj\Debug\AppLauncher.Update.resources
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\obj\Debug\AppLauncher.csproj.GenerateResource.Cache
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\obj\Debug\AppLauncher.exe
+C:\Users\lhgomes\AppData\Local\Temporary Projects\AppLauncher\obj\Debug\AppLauncher.pdb
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\bin\Debug\AppLauncher.exe.config
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\obj\Debug\AppLauncher.exe
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\obj\Debug\AppLauncher.pdb
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\bin\Debug\AppLauncher.exe
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\bin\Debug\AppLauncher.pdb
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\obj\Debug\AppLauncher.csprojResolveAssemblyReference.cache
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\obj\Debug\AppLauncher.Properties.Resources.resources
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\obj\Debug\AppLauncher.Update.resources
+\\mac\home\Documents\Visual Studio 2015\Projects\AppLauncher\AppLauncher\obj\Debug\AppLauncher.csproj.GenerateResource.Cache
+C:\Users\lhgomes\Source\Repos\AppLauncher\AppLauncher\bin\Debug\AppLauncher.exe.config
+C:\Users\lhgomes\Source\Repos\AppLauncher\AppLauncher\obj\Debug\AppLauncher.exe
+C:\Users\lhgomes\Source\Repos\AppLauncher\AppLauncher\obj\Debug\AppLauncher.pdb
