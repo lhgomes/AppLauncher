@@ -1,20 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.IO;
-using System.Configuration;
-using System.Security;
-using System.Security.Permissions;
+using System;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 
 namespace AppLauncher.Class
 {
     class Run
     {
         private Logging logToFile = null;
-        static string appDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        static string localFolder = string.Format(@"{0}\{1}", appDataFolder, Properties.Settings.Default.AppName);
+        private static readonly string appDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        private static readonly string localFolder = Path.Combine(appDataFolder, Properties.Settings.Default.AppName);
 
         public Run()
         {
@@ -24,160 +19,236 @@ namespace AppLauncher.Class
 
         public void Execute()
         {
-            if (!Properties.Settings.Default.MultiInstance)
+            if (!Properties.Settings.Default.MultiInstance && IsRunningInCurrentSession())
             {
-                var processName = Properties.Settings.Default.ExecFile.Split('.')[0];
-                addNewLog(string.Concat("Searching for process: ", processName));
-
-                var runningProcess = Process.GetProcessesByName(processName).Count();
-                addNewLog(string.Concat("Running process: ", runningProcess));
-                if (runningProcess > 0)
-                {
-                    System.Windows.Forms.MessageBox.Show(Properties.Settings.Default.MultiInstanceMessage, 
-                        Properties.Settings.Default.AppName, 
-                        System.Windows.Forms.MessageBoxButtons.OK, 
-                        System.Windows.Forms.MessageBoxIcon.Exclamation);
-                    return;
-                }
+                System.Windows.Forms.MessageBox.Show(Properties.Settings.Default.MultiInstanceMessage,
+                    Properties.Settings.Default.AppName,
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Exclamation);
+                return;
             }
 
-            string localFolder = GetLocalFolder();
-            if (string.IsNullOrEmpty(localFolder))
-            {
-                var sourceFolder = string.Format(@"{0}\{1}",
-                    new FileInfo(System.Reflection.Assembly.GetExecutingAssembly().Location).Directory.FullName,
-                    Properties.Settings.Default.VersionFolder);
+            string sourceRoot = new FileInfo(System.Reflection.Assembly.GetExecutingAssembly().Location).Directory.FullName;
+            string versionFolder = ResolveVersionFolder(sourceRoot);
+            if (string.IsNullOrEmpty(versionFolder))
+                return;
 
+            string sourceFolder = Path.Combine(sourceRoot, versionFolder);
+            string userFolder = GetLocalFolder();
+
+            if (string.IsNullOrEmpty(userFolder))
+            {
                 RunApp(sourceFolder);
+                return;
             }
-            else
+
+            string currentVersionFolder = Path.Combine(userFolder, versionFolder);
+            addNewLog("Current Version Folder: " + currentVersionFolder);
+
+            if (!Directory.Exists(currentVersionFolder))
             {
-                string currentVersionFolder = string.Format(@"{0}\{1}", localFolder,
-                    Properties.Settings.Default.VersionFolder);
+                if (!InstallVersion(sourceFolder, currentVersionFolder))
+                    return;
+            }
 
-                addNewLog(string.Concat("Current Version Folder: ", currentVersionFolder));
+            RemoveOldVersions(currentVersionFolder);
+            RunApp(currentVersionFolder);
+        }
 
-                if (!Directory.Exists(currentVersionFolder))
-                {
-                    addNewLog("Trying to create the current version folder.");
-                    Directory.CreateDirectory(currentVersionFolder);
+        private bool IsRunningInCurrentSession()
+        {
+            string processName = Path.GetFileNameWithoutExtension(Properties.Settings.Default.ExecFile);
+            int currentSessionId = Process.GetCurrentProcess().SessionId;
+            addNewLog("Searching for process in session " + currentSessionId + ": " + processName);
 
-                    var sourceFolder = string.Format(@"{0}\{1}",
-                        new FileInfo(System.Reflection.Assembly.GetExecutingAssembly().Location).Directory.FullName,
-                        Properties.Settings.Default.VersionFolder);
-                    addNewLog(string.Concat("Source Folder: ", sourceFolder));
+            int runningProcess = Process.GetProcessesByName(processName)
+                .Count(p => GetSessionIdSafely(p) == currentSessionId);
 
-                    if (Directory.Exists(sourceFolder))
-                    {
-                        addNewLog("Copying files.");
+            addNewLog("Running process in current session: " + runningProcess);
+            return runningProcess > 0;
+        }
 
-                        using (var updateForm = new Update())
-                        {
-                            updateForm.Show();
-                            updateForm.UpdateVersion(sourceFolder, currentVersionFolder);
-                        }
-                    }
-                    else
-                    {
-                        System.Windows.Forms.MessageBox.Show("Source folder doesn't exist.",
-                            Properties.Settings.Default.AppName, 
-                            System.Windows.Forms.MessageBoxButtons.OK, 
-                            System.Windows.Forms.MessageBoxIcon.Error);
-
-                        addNewLog("Source folder doesn't exist.");
-                        return;
-                    }
-                }
-                else
-                {
-                    addNewLog("Current version folder already exists.");
-                }
-
-                RemoveOldVersions();
-                RunApp(currentVersionFolder);
+        private static int GetSessionIdSafely(Process process)
+        {
+            try
+            {
+                return process.SessionId;
+            }
+            catch
+            {
+                return -1;
+            }
+            finally
+            {
+                process.Dispose();
             }
         }
 
-        private void RemoveOldVersions()
+        private string ResolveVersionFolder(string sourceRoot)
         {
-            var di = new DirectoryInfo(localFolder);
-            var directories = di.EnumerateDirectories()
-                                .OrderBy(d => d.CreationTime)
-                                .Select(d => d.Name)
-                                .ToList();
-
-            addNewLog(string.Concat("Old Versions founded: ", directories.Count));
-            var removeDirectories = directories.Count - Properties.Settings.Default.KeepLastVersions;
-
-            for (int i = 0; i < removeDirectories; i++)
+            string configuredVersion = Properties.Settings.Default.VersionFolder;
+            if (!string.IsNullOrWhiteSpace(configuredVersion))
             {
-                addNewLog(string.Concat("Removing old Version Folder: ", directories[i]));
-                Directory.Delete(directories[i]);
+                string configuredPath = Path.Combine(sourceRoot, configuredVersion);
+                if (Directory.Exists(configuredPath))
+                    return configuredVersion;
+
+                ShowError("Configured source version folder doesn't exist: " + configuredVersion);
+                return null;
             }
+
+            var latest = new DirectoryInfo(sourceRoot)
+                .EnumerateDirectories()
+                .Where(d => !d.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(d => d.Name, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            if (latest == null)
+            {
+                ShowError("No application release folder was found.");
+                return null;
+            }
+
+            addNewLog("Automatically selected version folder: " + latest.Name);
+            return latest.Name;
         }
 
-        private bool RunApp(string FolderName)
+        private bool InstallVersion(string sourceFolder, string destinationFolder)
         {
-            string exeFileName = string.Format(@"{0}\{1}", FolderName,
-                Properties.Settings.Default.ExecFile);
-            addNewLog(string.Concat("Application EXE name: ", exeFileName));
-
-            if (File.Exists(exeFileName))
+            if (!Directory.Exists(sourceFolder))
             {
-                string appArguments = Properties.Settings.Default.AppArguments;
-                addNewLog(string.Concat("Application EXE arguments: ", appArguments));
+                ShowError("Source folder doesn't exist: " + sourceFolder);
+                return false;
+            }
 
-                ProcessStartInfo startInfo = new ProcessStartInfo()
+            string temporaryFolder = destinationFolder + ".tmp";
+            try
+            {
+                if (Directory.Exists(temporaryFolder))
+                    Directory.Delete(temporaryFolder, true);
+
+                Directory.CreateDirectory(temporaryFolder);
+                addNewLog("Copying release to temporary folder: " + temporaryFolder);
+
+                using (var updateForm = new Update())
                 {
-                    FileName = exeFileName,
-                    Arguments = appArguments
-                };
-                Process.Start(startInfo);
+                    updateForm.Show();
+                    updateForm.UpdateVersion(sourceFolder, temporaryFolder);
+                }
+
+                string executable = Path.Combine(temporaryFolder, Properties.Settings.Default.ExecFile);
+                if (!File.Exists(executable))
+                    throw new FileNotFoundException("Application executable was not found after copying the release.", executable);
+
+                Directory.Move(temporaryFolder, destinationFolder);
+                addNewLog("Release installation completed: " + destinationFolder);
                 return true;
             }
-            else
+            catch (Exception ex)
             {
-                addNewLog("Application EXE dosn't exists.");
+                addNewLog("Release installation failed: " + ex);
+                try
+                {
+                    if (Directory.Exists(temporaryFolder))
+                        Directory.Delete(temporaryFolder, true);
+                }
+                catch (Exception cleanupEx)
+                {
+                    addNewLog("Temporary folder cleanup failed: " + cleanupEx.Message);
+                }
+
+                ShowError("The application update could not be installed.\r\n\r\n" + ex.Message);
                 return false;
             }
         }
 
-        private string GetLocalFolder()
+        private void RemoveOldVersions(string currentVersionFolder)
         {
-            addNewLog(string.Concat("Environment Application Data Folder: ", appDataFolder));
-            addNewLog(string.Concat("Local Application Folder: ", localFolder));
-
-            if (!Directory.Exists(localFolder))
+            try
             {
-                addNewLog("Local Application Folder not exists.");
-                var permissionSet = new PermissionSet(PermissionState.None);
-                var writePermission = new FileIOPermission(FileIOPermissionAccess.Write, appDataFolder);
-                permissionSet.AddPermission(writePermission);
+                var directories = new DirectoryInfo(localFolder)
+                    .EnumerateDirectories()
+                    .Where(d => !d.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                    .Where(d => !string.Equals(d.FullName, currentVersionFolder, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(d => d.CreationTimeUtc)
+                    .ToList();
 
-                if (permissionSet.IsSubsetOf(AppDomain.CurrentDomain.PermissionSet))
+                int keepOldVersions = Math.Max(0, Properties.Settings.Default.KeepLastVersions - 1);
+                foreach (DirectoryInfo directory in directories.Skip(keepOldVersions))
                 {
-                    addNewLog("Trying to create the Local Application Folder.");
-                    Directory.CreateDirectory(localFolder);
-                }
-                else
-                {
-                    addNewLog("User don't have access to create the Local Application Folder.");
-                    return null;
+                    try
+                    {
+                        addNewLog("Removing old version folder: " + directory.FullName);
+                        directory.Delete(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Cleanup must never prevent the current application from starting.
+                        addNewLog("Unable to remove old version " + directory.FullName + ": " + ex.Message);
+                    }
                 }
             }
-            else
+            catch (Exception ex)
             {
-                addNewLog("Local Application Folder already exists.");
+                addNewLog("Old version cleanup failed: " + ex.Message);
             }
-
-            return localFolder;
         }
 
-        private void addNewLog(string Message)
+        private bool RunApp(string folderName)
+        {
+            string exeFileName = Path.Combine(folderName, Properties.Settings.Default.ExecFile);
+            addNewLog("Application EXE name: " + exeFileName);
+
+            if (!File.Exists(exeFileName))
+            {
+                ShowError("Application executable doesn't exist: " + exeFileName);
+                return false;
+            }
+
+            string appArguments = Properties.Settings.Default.AppArguments;
+            addNewLog("Application EXE arguments: " + appArguments);
+
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = exeFileName,
+                Arguments = appArguments,
+                WorkingDirectory = folderName,
+                UseShellExecute = true
+            };
+            Process.Start(startInfo);
+            return true;
+        }
+
+        private string GetLocalFolder()
+        {
+            addNewLog("Environment Local Application Data Folder: " + appDataFolder);
+            addNewLog("Local Application Folder: " + localFolder);
+
+            try
+            {
+                Directory.CreateDirectory(localFolder);
+                return localFolder;
+            }
+            catch (Exception ex)
+            {
+                addNewLog("Unable to create local application folder: " + ex.Message);
+                return null;
+            }
+        }
+
+        private void ShowError(string message)
+        {
+            addNewLog(message);
+            System.Windows.Forms.MessageBox.Show(message,
+                Properties.Settings.Default.AppName,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Error);
+        }
+
+        private void addNewLog(string message)
         {
             if (logToFile != null)
-                logToFile.WriteToLog(Message);
-
+                logToFile.WriteToLog(message);
         }
     }
 }
