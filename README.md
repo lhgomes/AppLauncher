@@ -6,10 +6,34 @@ Automatic application update and launcher for shared Windows/RDP environments.
 
 - Windows Server 2019 supported
 - .NET Framework 4.8
+- SDK-style `Microsoft.NET.Sdk` project targeting `net48`
 - AnyCPU, with Prefer 32-bit disabled
 - Application releases run from each user's `%LOCALAPPDATA%` profile
 
 Windows Server 2019 includes .NET Framework 4.7.2 by default, so install/enable .NET Framework 4.8 on servers where it is not already present.
+
+## Building
+
+The SDK-style project can be maintained with current Visual Studio or VS Code. On Windows, install the .NET Framework 4.8 Developer/Targeting Pack and MSBuild (Visual Studio Build Tools is sufficient).
+
+Build from a terminal with:
+
+```powershell
+msbuild AppLauncher.sln /t:Restore /p:Configuration=Release
+msbuild AppLauncher.sln /t:Build /p:Configuration=Release /p:Platform="Any CPU"
+```
+
+The Release output is under `AppLauncher\bin\Release\net48\`.
+
+## Continuous integration
+
+GitHub Actions runs a Windows/.NET Framework 4.8 Release build:
+
+- for pull requests targeting `master`;
+- for pushes to `master`;
+- when manually started with `workflow_dispatch`.
+
+Successful builds upload `AppLauncher-net48` as a build artifact retained for 30 days. This makes the CI build the pre-merge validation for SDK-style and .NET Framework compatibility.
 
 ## Configuration
 
@@ -53,7 +77,7 @@ The application executes from that user-local directory. This means a new releas
 
 ## Updating an application
 
-1. Build/publish the application from Visual Studio into a new release directory.
+1. Build/publish the application into a new release directory.
 2. Copy the complete release directory beside `AppLauncher.exe`.
 3. Either update `VersionFolder` in `AppLauncher.exe.config`, or leave `VersionFolder` blank and use sortable release folder names.
 4. The next launch in each RDP session installs the new version into that user's local profile and starts it.
