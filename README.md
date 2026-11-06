@@ -46,8 +46,9 @@ Configuration is stored in `AppLauncher.exe.config`.
 - `ExecFile`: executable started after the update.
 - `LogDebug`: writes diagnostic logging to `%TEMP%`.
 - `IgnoreExtensions`: retained for compatibility with existing configurations.
-- `MultiInstance`: whether more than one application instance is allowed in the same RDP session.
+- `MultiInstance`: whether more than one application instance is allowed in the same RDP session. When disabled, AppLauncher uses a per-session named mutex, so executable renaming does not affect instance detection.
 - `MultiInstanceMessage`: message displayed when another instance exists in the current session.
+- `PersonalizeExecutableName`: when `True`, AppLauncher creates and launches a user-specific executable named `<base>_<file-version>_<username>.exe` in the user's cached release folder. Dots in the version are replaced with underscores. The matching `.exe.config` is copied to the personalized name.
 
 ## Recommended RDP deployment
 
@@ -86,6 +87,8 @@ Updates are copied first to a `.tmp` directory and moved into place only after t
 
 ## RDP behavior
 
-When `MultiInstance` is false, AppLauncher checks only processes in the current Windows session. An application running under another RDP user's session does not prevent the current user from starting it.
+When `MultiInstance` is false, AppLauncher uses a named mutex scoped to the current Windows session. An application running under another RDP user's session does not prevent the current user from starting it, and this remains reliable when executable personalization is enabled.
+
+With `PersonalizeExecutableName=True`, an application such as `ARS2.exe` with file version `2.25.17.0` launched by user `lgomes` runs as `ARS2_2_25_17_0_lgomes.exe`, making the user and version visible in Task Manager. The original cached executable is retained as the source for the personalized copy.
 
 Old-version cleanup is best-effort. A failure to delete an old release does not prevent the current release from starting.
