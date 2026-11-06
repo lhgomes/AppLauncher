@@ -2,12 +2,15 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Threading;
 
 namespace AppLauncher.Class
 {
     class Run
     {
         private Logging logToFile = null;
+        private Mutex instanceMutex;
         private static readonly string appDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         private static readonly string localFolder = Path.Combine(appDataFolder, Properties.Settings.Default.AppName);
 
@@ -19,7 +22,7 @@ namespace AppLauncher.Class
 
         public void Execute()
         {
-            if (!Properties.Settings.Default.MultiInstance && IsRunningInCurrentSession())
+            if (!Properties.Settings.Default.MultiInstance && !AcquireInstanceMutex())
             {
                 System.Windows.Forms.MessageBox.Show(Properties.Settings.Default.MultiInstanceMessage,
                     Properties.Settings.Default.AppName,
@@ -55,33 +58,27 @@ namespace AppLauncher.Class
             RunApp(currentVersionFolder);
         }
 
-        private bool IsRunningInCurrentSession()
+        private bool AcquireInstanceMutex()
         {
-            string processName = Path.GetFileNameWithoutExtension(Properties.Settings.Default.ExecFile);
-            int currentSessionId = Process.GetCurrentProcess().SessionId;
-            addNewLog("Searching for process in session " + currentSessionId + ": " + processName);
+            string mutexName = BuildMutexName();
+            bool createdNew;
+            instanceMutex = new Mutex(true, mutexName, out createdNew);
+            addNewLog("Instance mutex: " + mutexName + "; acquired: " + createdNew);
 
-            int runningProcess = Process.GetProcessesByName(processName)
-                .Count(p => GetSessionIdSafely(p) == currentSessionId);
+            if (!createdNew)
+            {
+                instanceMutex.Dispose();
+                instanceMutex = null;
+            }
 
-            addNewLog("Running process in current session: " + runningProcess);
-            return runningProcess > 0;
+            return createdNew;
         }
 
-        private static int GetSessionIdSafely(Process process)
+        private string BuildMutexName()
         {
-            try
-            {
-                return process.SessionId;
-            }
-            catch
-            {
-                return -1;
-            }
-            finally
-            {
-                process.Dispose();
-            }
+            string appName = SanitizeFileNamePart(Properties.Settings.Default.AppName);
+            int sessionId = Process.GetCurrentProcess().SessionId;
+            return "Local\\AppLauncher_" + appName + "_Session_" + sessionId;
         }
 
         private string ResolveVersionFolder(string sourceRoot)
@@ -183,7 +180,6 @@ namespace AppLauncher.Class
                     }
                     catch (Exception ex)
                     {
-                        // Cleanup must never prevent the current application from starting.
                         addNewLog("Unable to remove old version " + directory.FullName + ": " + ex.Message);
                     }
                 }
@@ -197,6 +193,20 @@ namespace AppLauncher.Class
         private bool RunApp(string folderName)
         {
             string exeFileName = Path.Combine(folderName, Properties.Settings.Default.ExecFile);
+
+            if (Properties.Settings.Default.PersonalizeExecutableName)
+            {
+                try
+                {
+                    exeFileName = PreparePersonalizedExecutable(folderName, exeFileName);
+                }
+                catch (Exception ex)
+                {
+                    ShowError("The personalized application executable could not be prepared.\r\n\r\n" + ex.Message);
+                    return false;
+                }
+            }
+
             addNewLog("Application EXE name: " + exeFileName);
 
             if (!File.Exists(exeFileName))
@@ -208,15 +218,71 @@ namespace AppLauncher.Class
             string appArguments = Properties.Settings.Default.AppArguments;
             addNewLog("Application EXE arguments: " + appArguments);
 
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            try
             {
-                FileName = exeFileName,
-                Arguments = appArguments,
-                WorkingDirectory = folderName,
-                UseShellExecute = true
-            };
-            Process.Start(startInfo);
-            return true;
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = exeFileName,
+                    Arguments = appArguments,
+                    WorkingDirectory = folderName,
+                    UseShellExecute = true
+                };
+
+                Process process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    ShowError("Windows did not start the application process.");
+                    return false;
+                }
+
+                addNewLog("Application started successfully. PID: " + process.Id);
+                process.Dispose();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                addNewLog("Application launch failed: " + ex);
+                ShowError("The application could not be started.\r\n\r\n" + ex.Message);
+                return false;
+            }
+        }
+
+        private string PreparePersonalizedExecutable(string folderName, string originalExe)
+        {
+            if (!File.Exists(originalExe))
+                throw new FileNotFoundException("Application executable doesn't exist.", originalExe);
+
+            FileVersionInfo versionInfo = FileVersionInfo.GetVersionInfo(originalExe);
+            string version = string.IsNullOrWhiteSpace(versionInfo.FileVersion) ? "unknown" : versionInfo.FileVersion;
+            string baseName = Path.GetFileNameWithoutExtension(originalExe);
+            string personalizedName = string.Format("{0}_{1}_{2}.exe",
+                SanitizeFileNamePart(baseName),
+                SanitizeFileNamePart(version.Replace('.', '_')),
+                SanitizeFileNamePart(Environment.UserName));
+
+            string personalizedExe = Path.Combine(folderName, personalizedName);
+            File.Copy(originalExe, personalizedExe, true);
+
+            string originalConfig = originalExe + ".config";
+            string personalizedConfig = personalizedExe + ".config";
+            if (File.Exists(originalConfig))
+                File.Copy(originalConfig, personalizedConfig, true);
+
+            addNewLog("Personalized executable: " + personalizedExe);
+            return personalizedExe;
+        }
+
+        private static string SanitizeFileNamePart(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "unknown";
+
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            StringBuilder result = new StringBuilder(value.Length);
+            foreach (char c in value)
+                result.Append(invalidChars.Contains(c) || char.IsWhiteSpace(c) ? '_' : c);
+
+            return result.ToString();
         }
 
         private string GetLocalFolder()
